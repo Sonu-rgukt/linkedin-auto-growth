@@ -3,59 +3,94 @@ import os
 import json
 import random
 import sys
+import xml.etree.ElementTree as ET
+import time
 
 # --- CONFIGURATION ---
 LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
+# Trusted Sources (Tech, AI, Remote Work)
+RSS_FEEDS = [
+    "https://feeds.feedburner.com/TheHackersNews",
+    "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "https://www.theverge.com/rss/index.xml",
+    "https://openai.com/blog/rss/",
+    "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss"
+]
+
 def get_user_urn():
-    """
-    Fetches the User ID using the OpenID Connect (OIDC) endpoint.
-    """
+    """Fetches User ID via OpenID endpoint."""
     url = "https://api.linkedin.com/v2/userinfo"
     headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}"}
     
-    print(f"🔍 Fetching User ID from: {url}")
     response = requests.get(url, headers=headers)
-    
     if response.status_code == 200:
         user_data = response.json()
-        user_id = user_data.get('sub') 
-        if user_id:
-            final_urn = f"urn:li:person:{user_id}"
-            print(f"✅ Found User URN: {final_urn}")
-            return final_urn
-        else:
-            print(f"❌ Error: 'sub' ID not found in response: {user_data}")
-            sys.exit(1)
+        return f"urn:li:person:{user_data['sub']}"
     else:
-        print(f"❌ FATAL: Could not fetch User ID. Status: {response.status_code}")
-        print(f"Response: {response.text}")
+        print(f"❌ FATAL: Auth Failed. {response.text}")
         sys.exit(1)
 
-def generate_viral_post():
-    # UPDATED MODEL: gemini-2.5-flash (Current Standard for late 2025)
+def fetch_fresh_news():
+    """Scans RSS feeds for the latest tech news."""
+    print("🔍 Scanning the web for fresh data...")
+    # Shuffle feeds so we don't always pick the same source
+    random.shuffle(RSS_FEEDS)
+    
+    for feed in RSS_FEEDS:
+        try:
+            response = requests.get(feed, timeout=5)
+            if response.status_code == 200:
+                root = ET.fromstring(response.content)
+                # Get the first 2 items from this feed
+                items = root.findall("./channel/item")[:2]
+                if items:
+                    item = random.choice(items)
+                    title = item.find("title").text
+                    link = item.find("link").text
+                    print(f"✅ Found Topic: {title}")
+                    return f"{title} - {link}"
+        except Exception as e:
+            print(f"⚠️ Error reading feed {feed}: {e}")
+            continue
+    
+    print("❌ No fresh news found in any feed.")
+    return None
+
+def generate_viral_post(topic):
+    """Uses Gemini 2.5 to write the post."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     
-    prompt = "Write a short, professional LinkedIn post (under 50 words) announcing that I am starting an automated AI experiment. Include 2 hashtags."
+    prompt = f"""
+    Act as a top Tech Influencer (Context: 2025 AI Trends).
+    I found this news: "{topic}"
+    
+    Write a high-impact LinkedIn post about it.
+    
+    Structure:
+    1. HOOK: A punchy 1-sentence opinion or fact.
+    2. INSIGHT: 2-3 bullet points explaining why this matters for developers/engineers.
+    3. PREDICTION: A 1-sentence prediction about the future of this tech.
+    4. ENGAGEMENT: A short question to the audience.
+    
+    Constraints:
+    - Total length: Under 120 words.
+    - Tone: Professional, optimistic, authoritative.
+    - No emojis in the first line.
+    - Include 3 hashtags.
+    """
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    print(f"🧠 Generating content using Gemini 2.5 Flash...")
+    print(f"🧠 Sending to Gemini 2.5...")
     response = requests.post(url, json=payload)
     
     if response.status_code == 200:
         return response.json()['candidates'][0]['content']['parts'][0]['text']
     else:
-        print(f"❌ AI Generation Failed: {response.text}")
-        # If 2.5 fails, try the backup 2.0 model
-        print("⚠️ Retrying with Gemini 2.0 Flash...")
-        url_backup = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        response_backup = requests.post(url_backup, json=payload)
-        if response_backup.status_code == 200:
-             return response_backup.json()['candidates'][0]['content']['parts'][0]['text']
-        else:
-             sys.exit(1)
+        print(f"❌ AI Error: {response.text}")
+        return None
 
 def post_to_linkedin(urn, content):
     url = "https://api.linkedin.com/v2/ugcPosts"
@@ -70,33 +105,36 @@ def post_to_linkedin(urn, content):
         "lifecycleState": "PUBLISHED",
         "specificContent": {
             "com.linkedin.ugc.ShareContent": {
-                "shareCommentary": {
-                    "text": content
-                },
+                "shareCommentary": {"text": content},
                 "shareMediaCategory": "NONE"
             }
         },
-        "visibility": {
-            "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
-        }
+        "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}
     }
     
-    print(f"🚀 Attempting to post to: {urn}")
     response = requests.post(url, headers=headers, json=payload)
-    
     if response.status_code == 201:
         print("✅ SUCCESS! Post is live.")
-        print(f"Post ID: {response.json().get('id')}")
     else:
-        print(f"❌ POST FAILED. Status: {response.status_code}")
-        print(f"ERROR DETAILS: {response.text}")
+        print(f"❌ Posting Failed: {response.text}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("--- STARTING BOT ---")
     urn = get_user_urn()
     
-    post_text = generate_viral_post()
-    print(f"📝 Generated Content: {post_text[:30]}...")
+    # 1. Find News
+    news_item = fetch_fresh_news()
     
-    post_to_linkedin(urn, post_text)
+    if news_item:
+        # 2. Write Post
+        post_content = generate_viral_post(news_item)
+        
+        if post_content:
+            # 3. Publish
+            post_to_linkedin(urn, post_content)
+        else:
+            print("❌ Aborting: AI failed to generate text.")
+            sys.exit(1)
+    else:
+        print("❌ Aborting: No news found.")
+        sys.exit(1)
