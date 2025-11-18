@@ -11,9 +11,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 def get_user_urn():
     """
     Fetches the User ID using the OpenID Connect (OIDC) endpoint.
-    This works with the 'openid' and 'profile' scopes.
     """
-    # SWITCHED TO NEW ENDPOINT
     url = "https://api.linkedin.com/v2/userinfo"
     headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}"}
     
@@ -22,10 +20,8 @@ def get_user_urn():
     
     if response.status_code == 200:
         user_data = response.json()
-        # 'sub' is the unique ID in OpenID. We must verify it exists.
         user_id = user_data.get('sub') 
         if user_id:
-            # LinkedIn needs the ID in this specific format: urn:li:person:YOUR_ID
             final_urn = f"urn:li:person:{user_id}"
             print(f"✅ Found User URN: {final_urn}")
             return final_urn
@@ -38,17 +34,28 @@ def get_user_urn():
         sys.exit(1)
 
 def generate_viral_post():
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # UPDATED MODEL: gemini-2.5-flash (Current Standard for late 2025)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
     prompt = "Write a short, professional LinkedIn post (under 50 words) announcing that I am starting an automated AI experiment. Include 2 hashtags."
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    
+    print(f"🧠 Generating content using Gemini 2.5 Flash...")
     response = requests.post(url, json=payload)
     
     if response.status_code == 200:
         return response.json()['candidates'][0]['content']['parts'][0]['text']
     else:
         print(f"❌ AI Generation Failed: {response.text}")
-        sys.exit(1)
+        # If 2.5 fails, try the backup 2.0 model
+        print("⚠️ Retrying with Gemini 2.0 Flash...")
+        url_backup = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        response_backup = requests.post(url_backup, json=payload)
+        if response_backup.status_code == 200:
+             return response_backup.json()['candidates'][0]['content']['parts'][0]['text']
+        else:
+             sys.exit(1)
 
 def post_to_linkedin(urn, content):
     url = "https://api.linkedin.com/v2/ugcPosts"
@@ -90,6 +97,6 @@ if __name__ == "__main__":
     urn = get_user_urn()
     
     post_text = generate_viral_post()
-    print("📝 Generated Content. Posting now...")
+    print(f"📝 Generated Content: {post_text[:30]}...")
     
     post_to_linkedin(urn, post_text)
