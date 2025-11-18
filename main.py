@@ -1,98 +1,61 @@
 import requests
 import os
 import json
-import xml.etree.ElementTree as ET
 import random
-import time
+import sys
 
 # --- CONFIGURATION ---
 LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-# Trusted Sources (Tech News & Remote Jobs)
-RSS_FEEDS = [
-    "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
-    "https://feeds.feedburner.com/TheHackersNews",
-    "https://techcrunch.com/feed/",
-    "https://mashable.com/feeds/rss/tech"
-]
-
 def get_user_urn():
-    """Automatically fetches your LinkedIn User ID (URN)."""
-    url = "https://api.linkedin.com/v2/me"
+    """
+    Fetches the User ID using the OpenID Connect (OIDC) endpoint.
+    This works with the 'openid' and 'profile' scopes.
+    """
+    # SWITCHED TO NEW ENDPOINT
+    url = "https://api.linkedin.com/v2/userinfo"
     headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}"}
+    
+    print(f"🔍 Fetching User ID from: {url}")
     response = requests.get(url, headers=headers)
     
     if response.status_code == 200:
         user_data = response.json()
-        return f"urn:li:person:{user_data['id']}"
+        # 'sub' is the unique ID in OpenID. We must verify it exists.
+        user_id = user_data.get('sub') 
+        if user_id:
+            # LinkedIn needs the ID in this specific format: urn:li:person:YOUR_ID
+            final_urn = f"urn:li:person:{user_id}"
+            print(f"✅ Found User URN: {final_urn}")
+            return final_urn
+        else:
+            print(f"❌ Error: 'sub' ID not found in response: {user_data}")
+            sys.exit(1)
     else:
-        print(f"❌ Error fetching User ID: {response.text}")
-        return None
+        print(f"❌ FATAL: Could not fetch User ID. Status: {response.status_code}")
+        print(f"Response: {response.text}")
+        sys.exit(1)
 
-def fetch_content():
-    """Fetches a random news item or job from RSS feeds."""
-    print("🔍 Scanning the web for trends...")
-    selected_feed = random.choice(RSS_FEEDS)
-    
-    try:
-        response = requests.get(selected_feed, timeout=10)
-        root = ET.fromstring(response.content)
-        
-        # Get the first 3 items and pick one randomly to avoid repetition
-        items = root.findall("./channel/item")[:3]
-        if not items:
-            return None
-            
-        item = random.choice(items)
-        title = item.find("title").text
-        link = item.find("link").text
-        return f"{title} - {link}"
-    except Exception as e:
-        print(f"❌ Error fetching RSS: {e}")
-        return None
-
-def generate_viral_post(topic):
-    """Uses Gemini to write a high-engagement LinkedIn post."""
-    print(f"🧠 Generating insights on: {topic}")
-    
+def generate_viral_post():
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    prompt = "Write a short, professional LinkedIn post (under 50 words) announcing that I am starting an automated AI experiment. Include 2 hashtags."
     
-    prompt = f"""
-    Act as a world-class Tech Thought Leader (like Naval Ravikant or Justin Welsh).
-    I found this update: "{topic}"
-    
-    Write a LinkedIn post about this.
-    Rules:
-    1. HOOK: Start with a controversial or punchy one-liner.
-    2. VALUE: Use bullet points to explain why this matters to a software engineer's career.
-    3. TONE: Professional, insightful, but easy to read. No robotic words like "delve" or "unlock".
-    4. LENGTH: Short (under 150 words).
-    5. ENDING: Ask a specific question to drive comments.
-    6. HASHTAGS: Use 3 relevant tags.
-    """
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
-    
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
     response = requests.post(url, json=payload)
     
     if response.status_code == 200:
         return response.json()['candidates'][0]['content']['parts'][0]['text']
     else:
-        print(f"❌ Gemini Error: {response.text}")
-        return None
+        print(f"❌ AI Generation Failed: {response.text}")
+        sys.exit(1)
 
 def post_to_linkedin(urn, content):
-    """Publishes the generated content to LinkedIn."""
     url = "https://api.linkedin.com/v2/ugcPosts"
-    
     headers = {
         "Authorization": f"Bearer {LINKEDIN_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Restli-Protocol-Version": "2.0.0"
     }
     
     payload = {
@@ -111,33 +74,22 @@ def post_to_linkedin(urn, content):
         }
     }
     
+    print(f"🚀 Attempting to post to: {urn}")
     response = requests.post(url, headers=headers, json=payload)
     
     if response.status_code == 201:
-        print("✅ SUCCESS! Post published to LinkedIn.")
-        print("Check your profile now!")
+        print("✅ SUCCESS! Post is live.")
+        print(f"Post ID: {response.json().get('id')}")
     else:
-        print(f"❌ Posting Failed: {response.text}")
+        print(f"❌ POST FAILED. Status: {response.status_code}")
+        print(f"ERROR DETAILS: {response.text}")
+        sys.exit(1)
 
-# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    # 1. Get User ID
+    print("--- STARTING BOT ---")
     urn = get_user_urn()
     
-    if urn:
-        # 2. Find Content
-        raw_topic = fetch_content()
-        
-        if raw_topic:
-            # 3. Write Post
-            final_post = generate_viral_post(raw_topic)
-            
-            if final_post:
-                # 4. Publish
-                post_to_linkedin(urn, final_post)
-            else:
-                print("Skipping: Failed to generate text.")
-        else:
-            print("Skipping: No content found.")
-    else:
-        print("System Exit: Could not authenticate.")
+    post_text = generate_viral_post()
+    print("📝 Generated Content. Posting now...")
+    
+    post_to_linkedin(urn, post_text)
