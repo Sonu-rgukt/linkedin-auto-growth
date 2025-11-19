@@ -11,30 +11,42 @@ from datetime import datetime
 LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-# --- DATA SOURCES ---
-# 1. Morning Sources (News & Trends)
-NEWS_FEEDS = [
-    "https://feeds.feedburner.com/TheHackersNews",
-    "https://techcrunch.com/category/artificial-intelligence/feed/",
-    "https://www.theverge.com/rss/index.xml",
-    "https://openai.com/blog/rss/",
-    "https://googleaiblog.blogspot.com/atom.xml"
+# --- ELITE DATA SOURCES ---
+
+# 1. DEEP TECH & AI (Authority Building)
+# These sources make you look smarter than 99% of LinkedIn.
+AI_FEEDS = [
+    "http://googleaiblog.blogspot.com/atom.xml",                # Google AI Research (Direct Source)
+    "https://openai.com/blog/rss.xml",                          # OpenAI Official (The bleeding edge)
+    "https://www.mit.edu/newsoffice/topic/mit-artificial-intelligence-rss.xml", # MIT Research
+    "https://feeds.arstechnica.com/arstechnica/index",          # Ars Technica (Deep analysis)
+    "https://www.kdnuggets.com/feed",                           # Data Science Gold Standard
 ]
 
-# 2. Evening Sources (Jobs & Career Advice)
+# 2. VIRAL TECH NEWS (Trend Riding)
+# These sources trigger the "algorithm" because they are trending.
+NEWS_FEEDS = [
+    "https://feeds.feedburner.com/TheHackersNews",              # #1 Security & Hacker News
+    "https://techcrunch.com/category/artificial-intelligence/feed/", # VC & Startup News
+    "https://www.theverge.com/rss/index.xml",                   # Mainstream Tech
+    "https://wired.com/feed/category/science/latest/rss",       # WIRED Science/Tech
+]
+
+# 3. HIGH-PAYING JOBS (Value Add)
+# We only want Remote & Engineer roles. No low-tier spam.
 JOB_FEEDS = [
     "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
-    "https://weworkremotely.com/categories/remote-front-end-programming-jobs.rss",
-    "https://remotive.com/remote-jobs/software-dev/feed", 
-    "https://stackoverflow.com/jobs/feed" 
+    "https://weworkremotely.com/categories/remote-machine-learning-ai-jobs.rss", # High Pay
+    "https://remotive.com/remote-jobs/software-dev/feed",
+    "https://www.python.org/jobs/feed/rss/",                    # Python.org (Very high quality)
 ]
 
-def human_delay():
-    """Waits between 2 to 45 minutes to simulate human behavior."""
-    delay_minutes = random.randint(2, 45)
-    print(f"⏳ Sleeping for {delay_minutes} minutes to act human...")
-    time.sleep(delay_minutes * 60)
-    print("⏰ Waking up to post!")
+def clean_text(raw_text):
+    """Sanitizes AI output to remove robotic prefixes."""
+    bad_phrases = ["Here is a LinkedIn post", "Here is the post", "Sure, here is", "**Title:**", "##", "Subject:"]
+    for phrase in bad_phrases:
+        raw_text = raw_text.replace(phrase, "")
+    return raw_text.strip().strip('"').strip("'")
 
 def get_user_urn():
     url = "https://api.linkedin.com/v2/userinfo"
@@ -45,67 +57,104 @@ def get_user_urn():
     sys.exit(1)
 
 def fetch_data(mode):
-    """Fetches content based on time of day."""
-    sources = NEWS_FEEDS if mode == "MORNING" else JOB_FEEDS
+    """
+    Smart Fetcher:
+    - Morning: Mixes Deep AI & Viral News.
+    - Evening: Looks for Jobs.
+    """
+    if mode == "MORNING":
+        # 50% chance of Deep AI, 50% chance of Viral News
+        sources = AI_FEEDS if random.random() > 0.5 else NEWS_FEEDS
+    else:
+        sources = JOB_FEEDS
+
     random.shuffle(sources)
-    
     print(f"🔍 Searching {mode} sources...")
+    
     for feed in sources:
         try:
             response = requests.get(feed, timeout=10)
             if response.status_code == 200:
+                # Handle Atom (XML) vs RSS differences
                 root = ET.fromstring(response.content)
-                # Check first 3 items, pick one randomly
-                items = root.findall("./channel/item")[:3]
-                if items:
-                    item = random.choice(items)
-                    title = item.find("title").text
-                    link = item.find("link").text
+                
+                # Atom feeds use specific namespaces, RSS is simpler. 
+                # We try a generic search for 'item' or 'entry'
+                items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+                
+                # Look at first 5 items
+                candidates = items[:5]
+                if candidates:
+                    item = random.choice(candidates)
+                    
+                    # Extract Title & Link safely
+                    title = item.find("title").text if item.find("title") is not None else item.find("{http://www.w3.org/2005/Atom}title").text
+                    
+                    link_obj = item.find("link")
+                    if link_obj is not None:
+                        link = link_obj.text if link_obj.text else link_obj.attrib.get("href")
+                    else:
+                        link_obj = item.find("{http://www.w3.org/2005/Atom}link")
+                        link = link_obj.attrib.get("href")
+                    
+                    # JOB FILTER: If evening, ensure it's a "Good" job
+                    if mode == "EVENING":
+                        # Only post if it mentions Senior, Lead, AI, or Python
+                        keywords = ["Senior", "Lead", "Staff", "Principal", "AI", "Machine Learning", "Python", "Golang"]
+                        if not any(k in title for k in keywords):
+                            print(f"⚠️ Skipping low-tier job: {title}")
+                            continue 
+                            
                     return f"{title} - {link}"
-        except:
+        except Exception as e:
+            print(f"⚠️ Error reading feed {feed}: {e}")
             continue
     return None
 
-def generate_post(mode, topic):
+def generate_human_post(mode, topic):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     
     if mode == "MORNING":
-        # Educational / Insight Style
         prompt = f"""
-        Act as a Senior Tech Mentor for students and developers.
-        Topic: "{topic}"
+        Act as a Thought Leader in AI & Tech.
+        News: "{topic}"
         
         Write a LinkedIn post.
-        - HOOK: Start with a "Did you know?" or a strong opinion.
-        - BODY: Explain specifically why this technology matters for a student's future.
-        - TAKEAWAY: Give 1 actionable advice (e.g., "Start learning X").
-        - TONE: Encouraging, insightful, clear.
-        - HASHTAGS: #TechNews #Learning #FutureOfWork
+        STRICT RULES:
+        1. Output ONLY the post content.
+        2. NO "Here is the post".
+        3. Hook: A controversial or counter-intuitive statement about this news.
+        4. Insight: What does this mean for the next 5 years? (One sentence).
+        5. Advice: What should developers do today? (One sentence).
+        6. Tags: #TechTrends #FutureOfWork #AI
         """
     else:
-        # Career / Job Opportunity Style
         prompt = f"""
-        Act as a Career Coach for developers.
-        Opportunity: "{topic}"
+        Act as a connection sharing a high-value opportunity.
+        Job: "{topic}"
         
         Write a LinkedIn post.
-        - HOOK: "Remote Opportunity Alert 🚨" or similar.
-        - VALUE: Mention why this role/skill is in demand.
-        - ADVICE: Tell them what 2 skills they need to apply for jobs like this.
-        - CTA: "Check the link in the comments if interested!" (Don't put link in body).
-        - TONE: Urgent, helpful.
-        - HASHTAGS: #RemoteJobs #Hiring #CareerGrowth
+        STRICT RULES:
+        1. Output ONLY the post content.
+        2. Hook: "Who is looking for a Senior/Lead role?"
+        3. Why apply: "This company is hiring for [Role] and it looks legit."
+        4. Call to Action: "Link is in the comments." (Do not put link in body).
+        5. Tone: Casual helper.
         """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     response = requests.post(url, json=payload)
     
     if response.status_code == 200:
-        text = response.json()['candidates'][0]['content']['parts'][0]['text']
-        # Append the link at the very bottom if it's a job
+        raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+        final_text = clean_text(raw_text)
+        
+        # Append Link for Jobs
         if mode == "EVENING":
-            text += f"\n\n(Link found in source: {topic.split(' - ')[-1]})"
-        return text
+            link = topic.split(' - ')[-1]
+            final_text += f"\n\n🔗 Apply Here: {link}"
+            
+        return final_text
     return None
 
 def post_to_linkedin(urn, content):
@@ -129,28 +178,25 @@ def post_to_linkedin(urn, content):
     requests.post(url, headers=headers, json=payload)
 
 if __name__ == "__main__":
-    # 1. Determine Mode (UTC Time)
+    # Determine Mode
     current_hour = datetime.utcnow().hour
-    # If it's between 2 AM and 10 AM UTC (Morning in India/Europe), run Morning Mode
-    if 2 <= current_hour <= 10:
-        MODE = "MORNING"
-    else:
-        MODE = "EVENING"
+    MODE = "MORNING" if 2 <= current_hour <= 10 else "EVENING"
     
-    print(f"--- RUNNING {MODE} ROUTINE ---")
+    # HUMAN DELAY (Keep this enabled for production!)
+    # delay = random.randint(1, 20)
+    # time.sleep(delay * 60)
     
-    # 2. Human Delay (The Anti-Robot)
-    human_delay()
-    
-    # 3. Execution
     urn = get_user_urn()
-    data = fetch_data(MODE)
+    topic = fetch_data(MODE)
     
-    if data:
-        print(f"📝 Found Topic: {data}")
-        post = generate_post(MODE, data)
-        if post:
-            post_to_linkedin(urn, post)
-            print("✅ Posted successfully.")
+    if topic:
+        print(f"📝 Premium Topic Found: {topic}")
+        post_content = generate_human_post(MODE, topic)
+        
+        if post_content:
+            post_to_linkedin(urn, post_content)
+            print("✅ Posted World-Class Content.")
+        else:
+            print("❌ AI returned empty.")
     else:
-        print("❌ No data found.")
+        print("❌ No premium content found.")
