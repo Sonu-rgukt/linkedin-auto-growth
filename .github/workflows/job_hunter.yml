@@ -21,16 +21,17 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
+      # ... inside the jobs step ...
       - name: Run Listener
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # <--- ADD THIS LINE
         run: python telegram_bot/listener.py
 
-      # --- NEW STEP: UPLOAD THE CSV ---
-      - name: Upload Job Data
+      - name: Upload Clean Data
         uses: actions/upload-artifact@v4
         with:
-          name: daily-jobs-csv
-          path: jobs_data.csv
+          name: clean-jobs-csv
+          path: clean_jobs.csv  # <--- Changed filename
