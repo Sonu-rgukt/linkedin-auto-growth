@@ -1,0 +1,28 @@
+name: Empire Visual Engine (Advanced)
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # Mid-Day Trend (2:30 PM IST)
+  workflow_dispatch:      # Allows manual testing
+
+jobs:
+  run-empire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Empire Script
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: python main_empire.py
