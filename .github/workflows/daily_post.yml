@@ -2,10 +2,21 @@ name: Smart LinkedIn Growth Engine
 
 on:
   schedule:
-    - cron: '0 3 * * *'   # Morning Insight (8:30 AM IST)
-    - cron: '0 9 * * *'   # Mid-Day Trend (2:30 PM IST)
-    - cron: '30 14 * * *' # Evening Wrap (8:00 PM IST)
+    - cron: '0 3 * * *'   # Morning Insight (8:30 AM IST) -> Runs main.py
+    - cron: '0 9 * * *'   # Mid-Day Trend (2:30 PM IST)   -> Runs main_empire.py
+    - cron: '30 14 * * *' # Evening Wrap (8:00 PM IST)    -> Runs main.py
+  
+  # MANUAL TRIGGER: Allows you to choose which bot to run when testing
   workflow_dispatch:
+    inputs:
+      bot_type:
+        description: 'Which Bot to Run?'
+        required: true
+        default: 'EMPIRE'
+        type: choice
+        options:
+        - STANDARD (News/Jobs)
+        - EMPIRE (Visuals/Finance)
 
 jobs:
   build:
@@ -19,11 +30,29 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Requests
-        run: pip install requests
+      - name: Install All Dependencies
+        run: pip install -r requirements.txt
 
-      - name: Run Bot
+      # LOGIC: Run Standard Bot (main.py) ONLY in Morning (03:00) or Evening (14:30)
+      # OR if manually triggered with "STANDARD" selected.
+      - name: Run Standard Bot (News/Jobs)
+        if: >
+          github.event.schedule == '0 3 * * *' || 
+          github.event.schedule == '30 14 * * *' || 
+          github.event.inputs.bot_type == 'STANDARD'
         env:
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python main.py
+
+      # LOGIC: Run Empire Bot (main_empire.py) ONLY at Mid-Day (09:00)
+      # OR if manually triggered with "EMPIRE" selected.
+      - name: Run Empire Bot (Visuals/Finance)
+        if: >
+          github.event.schedule == '0 9 * * *' || 
+          github.event.inputs.bot_type == 'EMPIRE'
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: python main_empire.py
