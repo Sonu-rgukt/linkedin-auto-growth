@@ -2,10 +2,9 @@ name: Smart LinkedIn Growth Engine
 
 on:
   schedule:
-    # 1. Morning Post: Runs at 03:30 UTC (9:00 AM IST)
-    - cron: '30 3 * * *'
-    # 2. Evening Post: Runs at 12:30 UTC (6:00 PM IST)
-    - cron: '30 12 * * *'
+    - cron: '0 3 * * *'   # Morning Insight (8:30 AM IST)
+    - cron: '0 9 * * *'   # Mid-Day Trend (2:30 PM IST)
+    - cron: '30 14 * * *' # Evening Wrap (8:00 PM IST)
   workflow_dispatch:
 
 jobs:
