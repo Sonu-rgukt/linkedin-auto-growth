@@ -11,28 +11,36 @@ from datetime import datetime, timedelta, timezone
 api_id = int(os.environ['TG_API_ID'])
 api_hash = os.environ['TG_API_HASH']
 session_string = os.environ['TG_SESSION_STRING']
-gemini_key = os.environ['GEMINI_API_KEY']  # Make sure to add this to GitHub Secrets!
+gemini_key = os.environ['GEMINI_API_KEY'] # Ensure this Secret exists in GitHub
 
+# The Channels
 TARGET_CHANNELS = [
-    'freshers_opening', 'offcampusjobs_4u', 'jobsinternshipshub',
-    'TorchBearerr', 'hiringdaily', 'gocareers', 'offcampus_phodenge'
+    'freshers_opening',
+    'offcampusjobs_4u',
+    'jobsinternshipshub',
+    'TorchBearerr',
+    'hiringdaily',
+    'gocareers',
+    'offcampus_phodenge'
 ]
 
-def clean_with_gemini(raw_text):
-    """Uses Gemini Flash to extract structured data from messy text"""
+def clean_data_with_ai(raw_text):
+    """
+    Sends raw job text to Gemini and asks for structured JSON.
+    """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     
+    # Strict Prompt for consistent JSON
     prompt = f"""
-    Extract the following details from this job post into a JSON format:
+    Extract these details from the job post:
     - Company
     - Role
-    - Experience (or Batch)
-    - Salary (if mentioned, else "Not Disclosed")
-    - Apply_Link (The main URL to apply)
+    - Batch (e.g., 2024, 2025, or N/A)
+    - Apply_Link (The http url)
 
-    Input Text: "{raw_text[:500]}"
+    Input Text: "{raw_text[:800]}"
     
-    Return ONLY the JSON. No markdown.
+    Return ONLY valid JSON. Format: {{"Company": "...", "Role": "...", "Batch": "...", "Apply_Link": "..."}}
     """
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -40,23 +48,23 @@ def clean_with_gemini(raw_text):
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            # Clean up the response to get pure JSON
-            text_res = response.json()['candidates'][0]['content']['parts'][0]['text']
-            text_res = text_res.replace("```json", "").replace("```", "").strip()
-            return json.loads(text_res)
+            # Clean the response (sometimes AI adds ```json ... ```)
+            text = response.json()['candidates'][0]['content']['parts'][0]['text']
+            text = text.replace("```json", "").replace("```", "").strip()
+            return json.loads(text)
     except Exception as e:
-        print(f"   ⚠️ AI Error: {e}")
+        print(f"   ⚠️ AI Cleaning Failed: {e}")
     
     return None
 
 async def main():
-    print("--- 🕵️‍♂️ Recruitment Engine Starting ---")
+    print("--- 🕵️‍♂️ Recruitment Engine (AI Powered) Starting ---")
     
-    # New CSV with CLEAN columns
+    # New CSV Structure
     csv_filename = "clean_jobs.csv"
     f = open(csv_filename, "w", newline="", encoding="utf-8")
     writer = csv.writer(f)
-    writer.writerow(["Date", "Company", "Role", "Batch", "Salary", "Link", "Source"])
+    writer.writerow(["Date", "Company", "Role", "Batch", "Link", "Source"]) # Clean Headers
     
     async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
         print("✅ Login Successful. Scanning channels...")
@@ -68,32 +76,35 @@ async def main():
             try:
                 print(f"Scanning: {channel}...")
                 async for message in client.iter_messages(channel, offset_date=time_limit, reverse=True):
+                    
+                    # Basic Filter
                     if message.text and ("http" in message.text or "Apply" in message.text):
                         
-                        print(f"   🧠 Cleaning job from {channel}...")
+                        print(f"   🧠 Found Job. Cleaning with AI...")
                         
-                        # 1. Ask Gemini to Clean it
-                        data = clean_with_gemini(message.text)
+                        # 1. Send to AI
+                        clean_data = clean_data_with_ai(message.text)
                         
-                        if data:
+                        if clean_data:
                             # 2. Save Clean Data
                             writer.writerow([
                                 datetime.now().strftime("%Y-%m-%d"),
-                                data.get("Company", "N/A"),
-                                data.get("Role", "N/A"),
-                                data.get("Experience", "N/A"),
-                                data.get("Salary", "N/A"),
-                                data.get("Apply_Link", "N/A"),
+                                clean_data.get("Company", "Unknown"),
+                                clean_data.get("Role", "Unknown"),
+                                clean_data.get("Batch", "N/A"),
+                                clean_data.get("Apply_Link", "N/A"),
                                 channel
                             ])
-                            print(f"      ✨ Saved: {data.get('Company')} - {data.get('Role')}")
+                            print(f"      ✨ Saved: {clean_data.get('Company')} - {clean_data.get('Role')}")
                             jobs_found += 1
+                        else:
+                            print("      ⚠️ AI couldn't parse this one. Skipping.")
                         
             except Exception as e:
-                print(f"   ⚠️ Error in {channel}: {e}")
+                print(f"   ⚠️ Error accessing {channel}: {e}")
 
     f.close()
-    print(f"--- ✅ Found & Cleaned {jobs_found} jobs. Saved to {csv_filename} ---")
+    print(f"--- ✅ Scan Complete. Saved {jobs_found} CLEAN jobs to {csv_filename} ---")
 
 if __name__ == '__main__':
     asyncio.run(main())
