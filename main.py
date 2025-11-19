@@ -8,8 +8,8 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-LINKEDIN_TOKEN = os.environ.get("LINKEDIN_ACCESS_TOKEN")
-# Tries both key names to be safe
+LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
+# Robust Key Loading
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 if not LINKEDIN_TOKEN or not GEMINI_API_KEY:
@@ -72,20 +72,17 @@ def fetch_data(category):
             response = requests.get(feed, timeout=10)
             if response.status_code == 200:
                 root = ET.fromstring(response.content)
-                # Handle Atom (ns) vs RSS
                 items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
                 
                 candidates = items[:5]
                 if candidates:
                     item = random.choice(candidates)
                     
-                    # Extract Title
                     title_node = item.find("title")
                     if title_node is None:
                         title_node = item.find("{http://www.w3.org/2005/Atom}title")
                     title = title_node.text if title_node is not None else "News Update"
                     
-                    # Extract Link
                     link = "No Link"
                     link_obj = item.find("link")
                     if link_obj is not None:
@@ -95,20 +92,23 @@ def fetch_data(category):
                         if atom_link is not None:
                             link = atom_link.attrib.get("href")
                     
-                    # CRISIS FILTER
                     if category == "CRISIS":
                         if "investigating" not in title.lower() and "outage" not in title.lower():
                             continue 
                             
                     return f"{title} - {link}"
-        except Exception as e:
-            # print(f"Feed Error: {e}") 
+        except Exception:
             continue
     return None
 
 def generate_storyteller_post(category, topic):
-    # ✅ FIXED MODEL NAME: Using the stable 1.5 Flash model
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # 🚀 UPDATED MODEL LIST (Nov 2025)
+    # Tries the newest model first, falls back if you don't have preview access
+    MODELS = [
+        "gemini-3-pro-preview",  # The new beast (Released Nov 18, 2025)
+        "gemini-2.0-flash",      # The fast standard
+        "gemini-1.5-flash"       # The reliable backup
+    ]
     
     prompts = {
         "CRISIS": f"""
@@ -118,7 +118,6 @@ def generate_storyteller_post(category, topic):
         Style: Urgent, short, punchy. "Just in 🚨".
         Do not mention the URL in the text.
         """,
-        
         "FINANCE": f"""
         You are a Market Analyst like specialized in Tech Money.
         Topic: "{topic}"
@@ -126,14 +125,12 @@ def generate_storyteller_post(category, topic):
         Style: Analytical but simple. Use numbers if possible.
         Start with a bold claim.
         """,
-        
         "FUTURE": f"""
         You are a Visionary Tech Leader.
         Topic: "{topic}"
         Action: Translate this complex research into a simple benefit for humanity.
         Style: Optimistic, inspiring. "Imagine a world where..."
         """,
-        
         "TREND": f"""
         You are a Cultural Commentator.
         Topic: "{topic}"
@@ -144,7 +141,6 @@ def generate_storyteller_post(category, topic):
 
     prompt = f"""
     {prompts[category]}
-    
     STRICT RULES FOR HUMAN TOUCH:
     1. Output ONLY the post body. NO intro/outro.
     2. Do not use emojis in the first sentence.
@@ -155,20 +151,27 @@ def generate_storyteller_post(category, topic):
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    try:
-        response = requests.post(url, json=payload, timeout=15)
+    # Loop through models until one works
+    for model in MODELS:
+        # Note: API path v1beta works for all current preview/stable models
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
         
-        if response.status_code == 200:
-            raw = response.json()['candidates'][0]['content']['parts'][0]['text']
-            return clean_text(raw)
-        else:
-            # ✅ FIX: Print error if API fails
-            print(f"❌ Gemini API Error {response.status_code}: {response.text}")
-            return None
+        try:
+            response = requests.post(url, json=payload, timeout=15)
             
-    except Exception as e:
-        print(f"❌ Connection Error: {e}")
-        return None
+            if response.status_code == 200:
+                print(f"✅ Success using model: {model}")
+                raw = response.json()['candidates'][0]['content']['parts'][0]['text']
+                return clean_text(raw)
+            else:
+                print(f"⚠️ Model {model} failed ({response.status_code}). Trying next...")
+                
+        except Exception as e:
+            print(f"⚠️ Connection Error with {model}: {e}")
+            continue
+            
+    print("❌ All AI models failed. Check your API Key permissions.")
+    return None
 
 def post_to_linkedin(urn, content):
     url = "https://api.linkedin.com/v2/ugcPosts"
@@ -198,7 +201,6 @@ def post_to_linkedin(urn, content):
 if __name__ == "__main__":
     hour = datetime.utcnow().hour
     
-    # Simple logic to pick category based on time
     if 0 <= hour < 5:
         CATEGORY = "FINANCE" if random.random() > 0.5 else "FUTURE"
     elif 5 <= hour < 13:
@@ -206,15 +208,14 @@ if __name__ == "__main__":
     else:
         CATEGORY = "CRISIS" if random.random() > 0.8 else "TREND"
 
-    # Uncomment to force a specific category for testing:
+    # Force TREND for testing if you want to see it run now
     # CATEGORY = "TREND"
 
     print(f"🚀 Starting News Engine. Category: {CATEGORY}")
-
+    
     urn = get_user_urn()
     topic = fetch_data(CATEGORY)
     
-    # Fallback logic
     if not topic and CATEGORY == "CRISIS":
         print("No Crisis found. Switching to FUTURE news.")
         CATEGORY = "FUTURE"
@@ -226,6 +227,6 @@ if __name__ == "__main__":
         if post:
             post_to_linkedin(urn, post)
         else:
-            print("❌ Failed to generate post content (Check Gemini API Error above).")
+            print("❌ Failed to generate post.")
     else:
         print("❌ No interesting stories found today.")
