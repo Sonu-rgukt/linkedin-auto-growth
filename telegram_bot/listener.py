@@ -16,6 +16,13 @@ TARGET_CHANNELS = [
     'naukri_updates', 
     'remote_jobs',
     'developers_india'
+    'freshers_opening'
+    'offcampusjobs_4u'
+    'jobsinternshipshub'
+    'TorchBearerr'
+    'hiringdaily'
+    'gocareers'
+    'offcampus_phodenge'
 ]
 
 async def main():
