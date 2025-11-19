@@ -1,0 +1,29 @@
+name: Job Hunter Engine
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Runs every 2 hours
+  workflow_dispatch:       # Allows manual trigger button
+
+jobs:
+  hunt-jobs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Listener
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+        run: python telegram_bot/listener.py
