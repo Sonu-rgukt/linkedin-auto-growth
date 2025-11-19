@@ -2,11 +2,11 @@ name: Job Hunter Engine
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Runs every 2 hours
-  workflow_dispatch:
+    - cron: '0 4,10,16 * * *'  # Runs 3 times a day (approx Morning, Afternoon, Evening IST)
+  workflow_dispatch:           # Manual Button
 
 jobs:
-  hunt-jobs:
+  find-and-post:
     runs-on: ubuntu-latest
     
     steps:
@@ -21,17 +21,27 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      # ... inside the jobs step ...
-      - name: Run Listener
+      # 1. RUN LISTENER (Creates jobs_data.csv)
+      - name: 🕵️‍♂️ Hunt for Jobs (Telegram)
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # <--- ADD THIS LINE
+          # We need Gemini here too if using the cleaning version
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
         run: python telegram_bot/listener.py
 
-      - name: Upload Clean Data
+      # 2. RUN POSTER (Reads jobs_data.csv -> Posts to LinkedIn)
+      - name: 🚀 Post to LinkedIn
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python telegram_bot/poster.py
+      
+      # 3. SAVE CSV (Artifact for debugging)
+      - name: Upload Job Data
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: clean-jobs-csv
-          path: clean_jobs.csv  # <--- Changed filename
+          name: daily-jobs-csv
+          path: jobs_data.csv
