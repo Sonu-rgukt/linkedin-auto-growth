@@ -3,7 +3,7 @@ name: Job Hunter Engine
 on:
   schedule:
     - cron: '0 */2 * * *'  # Runs every 2 hours
-  workflow_dispatch:       # Allows manual trigger button
+  workflow_dispatch:
 
 jobs:
   hunt-jobs:
@@ -27,3 +27,10 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
         run: python telegram_bot/listener.py
+
+      # --- NEW STEP: UPLOAD THE CSV ---
+      - name: Upload Job Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-jobs-csv
+          path: jobs_data.csv
