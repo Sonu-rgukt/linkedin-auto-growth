@@ -15,13 +15,13 @@ TARGET_CHANNELS = [
     'gate_jobs_channel', 
     'naukri_updates', 
     'remote_jobs',
-    'developers_india'
-    'freshers_opening'
-    'offcampusjobs_4u'
-    'jobsinternshipshub'
-    'TorchBearerr'
-    'hiringdaily'
-    'gocareers'
+    'developers_india',
+    'freshers_opening',
+    'offcampusjobs_4u',
+    'jobsinternshipshub',
+    'TorchBearerr',
+    'hiringdaily',
+    'gocareers',
     'offcampus_phodenge'
 ]
 
