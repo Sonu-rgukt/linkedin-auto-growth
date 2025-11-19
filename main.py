@@ -8,28 +8,33 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+LINKEDIN_TOKEN = os.environ.get("LINKEDIN_ACCESS_TOKEN")
+# Tries both key names to be safe
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
-# --- 1. THE DATA STREAM (The World's Best Sources) ---
+if not LINKEDIN_TOKEN or not GEMINI_API_KEY:
+    print("❌ CRITICAL: Missing API Keys. Check GitHub Secrets.")
+    sys.exit(1)
+
+# --- 1. THE DATA STREAM ---
 FEEDS = {
-    "CRISIS": [ # Breaking Outages (High Virality)
+    "CRISIS": [ 
         "https://www.githubstatus.com/history.atom",
         "https://www.cloudflarestatus.com/history.atom",
         "https://status.openai.com/history.atom"
     ],
-    "FINANCE": [ # Money & Business (High Value)
+    "FINANCE": [ 
         "https://cointelegraph.com/rss",
         "https://feeds.feedburner.com/TechCrunch/startups",
         "https://www.investing.com/rss/news.rss"
     ],
-    "FUTURE": [ # AI & Deep Tech (Authority)
+    "FUTURE": [ 
         "http://googleaiblog.blogspot.com/atom.xml",
         "https://www.mit.edu/newsoffice/topic/mit-artificial-intelligence-rss.xml",
         "https://openai.com/blog/rss.xml"
     ],
-    "TREND": [ # What People Are Talking About
-        "https://trends.google.com/trending/rss?geo=US", # Change US to IN for India specific
+    "TREND": [ 
+        "https://trends.google.com/trending/rss?geo=US", 
         "https://www.theverge.com/rss/index.xml",
         "https://wired.com/feed/category/science/latest/rss"
     ]
@@ -52,6 +57,8 @@ def get_user_urn():
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         return f"urn:li:person:{response.json()['sub']}"
+    
+    print(f"❌ LinkedIn Auth Failed: {response.text}")
     sys.exit(1)
 
 def fetch_data(category):
@@ -73,29 +80,36 @@ def fetch_data(category):
                     item = random.choice(candidates)
                     
                     # Extract Title
-                    title = item.find("title").text if item.find("title") is not None else item.find("{http://www.w3.org/2005/Atom}title").text
+                    title_node = item.find("title")
+                    if title_node is None:
+                        title_node = item.find("{http://www.w3.org/2005/Atom}title")
+                    title = title_node.text if title_node is not None else "News Update"
                     
                     # Extract Link
+                    link = "No Link"
                     link_obj = item.find("link")
                     if link_obj is not None:
                         link = link_obj.text if link_obj.text else link_obj.attrib.get("href")
                     else:
-                        link = item.find("{http://www.w3.org/2005/Atom}link").attrib.get("href")
+                        atom_link = item.find("{http://www.w3.org/2005/Atom}link")
+                        if atom_link is not None:
+                            link = atom_link.attrib.get("href")
                     
-                    # CRISIS FILTER: Only post if it's actually an incident
+                    # CRISIS FILTER
                     if category == "CRISIS":
                         if "investigating" not in title.lower() and "outage" not in title.lower():
-                            continue # Skip boring status updates
+                            continue 
                             
                     return f"{title} - {link}"
-        except Exception:
+        except Exception as e:
+            # print(f"Feed Error: {e}") 
             continue
     return None
 
 def generate_storyteller_post(category, topic):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # ✅ FIXED MODEL NAME: Using the stable 1.5 Flash model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     
-    # DIFFERENT PERSONAS FOR DIFFERENT NEWS
     prompts = {
         "CRISIS": f"""
         You are a Breaking News Reporter.
@@ -121,7 +135,7 @@ def generate_storyteller_post(category, topic):
         """,
         
         "TREND": f"""
-        You are a Cultural Commentator (like Marques Brownlee).
+        You are a Cultural Commentator.
         Topic: "{topic}"
         Action: Give your opinion on this trend. Is it hype or real?
         Style: Conversational, skeptical but open-minded.
@@ -140,12 +154,21 @@ def generate_storyteller_post(category, topic):
     """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    response = requests.post(url, json=payload)
     
-    if response.status_code == 200:
-        raw = response.json()['candidates'][0]['content']['parts'][0]['text']
-        return clean_text(raw)
-    return None
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        
+        if response.status_code == 200:
+            raw = response.json()['candidates'][0]['content']['parts'][0]['text']
+            return clean_text(raw)
+        else:
+            # ✅ FIX: Print error if API fails
+            print(f"❌ Gemini API Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Connection Error: {e}")
+        return None
 
 def post_to_linkedin(urn, content):
     url = "https://api.linkedin.com/v2/ugcPosts"
@@ -165,32 +188,33 @@ def post_to_linkedin(urn, content):
         },
         "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}
     }
-    requests.post(url, headers=headers, json=payload)
+    
+    res = requests.post(url, headers=headers, json=payload)
+    if res.status_code == 201:
+        print("✅ Live on LinkedIn.")
+    else:
+        print(f"❌ Post Failed: {res.text}")
 
 if __name__ == "__main__":
-    # SMART SCHEDULER (Based on Time of Day)
     hour = datetime.utcnow().hour
     
-    # 0-4 UTC (Morning IST) -> FUTURE / FINANCE (Serious reads)
-    # 5-12 UTC (Afternoon IST) -> TREND (Viral stuff)
-    # 13+ UTC (Evening IST) -> CRISIS / TECH (News wrap up)
-    
+    # Simple logic to pick category based on time
     if 0 <= hour < 5:
         CATEGORY = "FINANCE" if random.random() > 0.5 else "FUTURE"
     elif 5 <= hour < 13:
         CATEGORY = "TREND"
     else:
-        # 20% chance to check for CRISIS, otherwise TREND
         CATEGORY = "CRISIS" if random.random() > 0.8 else "TREND"
 
-    # HUMAN DELAY (Enable for Production)
-    # delay = random.randint(5, 40)
-    # time.sleep(delay * 60)
-    
+    # Uncomment to force a specific category for testing:
+    # CATEGORY = "TREND"
+
+    print(f"🚀 Starting News Engine. Category: {CATEGORY}")
+
     urn = get_user_urn()
     topic = fetch_data(CATEGORY)
     
-    # Fallback: If no Crisis found, default to Future news
+    # Fallback logic
     if not topic and CATEGORY == "CRISIS":
         print("No Crisis found. Switching to FUTURE news.")
         CATEGORY = "FUTURE"
@@ -201,6 +225,7 @@ if __name__ == "__main__":
         post = generate_storyteller_post(CATEGORY, topic)
         if post:
             post_to_linkedin(urn, post)
-            print("✅ Live on LinkedIn.")
+        else:
+            print("❌ Failed to generate post content (Check Gemini API Error above).")
     else:
         print("❌ No interesting stories found today.")
