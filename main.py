@@ -3,53 +3,70 @@ import os
 import json
 import random
 import sys
+import re
 import xml.etree.ElementTree as ET
-import time
 from datetime import datetime
 
-# --- CONFIGURATION ---
+# --- 0. ARCHITECT CONFIGURATION ---
 LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
-# Robust Key Loading
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 if not LINKEDIN_TOKEN or not GEMINI_API_KEY:
-    print("❌ CRITICAL: Missing API Keys. Check GitHub Secrets.")
+    print("❌ CRITICAL: Missing API Keys. System Shutting Down.")
     sys.exit(1)
 
-# --- 1. THE DATA STREAM ---
+# --- 1. THE DATA LAKE (High Signal Sources) ---
 FEEDS = {
-    "CRISIS": [ 
-        "https://www.githubstatus.com/history.atom",
-        "https://www.cloudflarestatus.com/history.atom",
-        "https://status.openai.com/history.atom"
+    "OPPORTUNITY": [ # Focus on startups and building
+        "https://techcrunch.com/category/artificial-intelligence/feed/",
+        "https://www.ycombinator.com/blog/feed",
+        "https://feeds.feedburner.com/venturebeat/SZYF"
     ],
-    "FINANCE": [ 
-        "https://cointelegraph.com/rss",
-        "https://feeds.feedburner.com/TechCrunch/startups",
-        "https://www.investing.com/rss/news.rss"
-    ],
-    "FUTURE": [ 
+    "BREAKTHROUGH": [ # Deep tech
+        "https://openai.com/blog/rss.xml",
         "http://googleaiblog.blogspot.com/atom.xml",
-        "https://www.mit.edu/newsoffice/topic/mit-artificial-intelligence-rss.xml",
-        "https://openai.com/blog/rss.xml"
+        "https://aws.amazon.com/blogs/machine-learning/feed/"
     ],
-    "TREND": [ 
-        "https://trends.google.com/trending/rss?geo=US", 
-        "https://www.theverge.com/rss/index.xml",
-        "https://wired.com/feed/category/science/latest/rss"
+    "MARKET_SHIFT": [ # Where the money is moving
+        "https://cointelegraph.com/rss",
+        "https://www.theverge.com/rss/index.xml"
     ]
 }
 
-# --- 2. THE "HUMANIZER" ENGINE ---
-def clean_text(raw_text):
-    """Removes AI slop. We want pure human text."""
-    bad_phrases = [
-        "Here is a LinkedIn post", "Here is the post", "Sure!", "ChatGPT", 
-        "**Title:**", "##", "Subject:", "Delve", "Realm", "Landscape"
+# --- 2. UTILITY: The XML Sanitizer ---
+def parse_feed_robust(xml_content):
+    """
+    Normalizes RSS vs Atom feeds by stripping namespaces.
+    This prevents the parser from failing on different XML standards.
+    """
+    try:
+        # Brutal namespace stripping for easier parsing
+        it = ET.iterparse(xml_content)
+        for _, el in it:
+            if '}' in el.tag:
+                el.tag = el.tag.split('}', 1)[1]  # Strip {http://...}
+        root = it.root
+        return root
+    except:
+        # Fallback to standard string parsing if iterparse fails
+        return ET.fromstring(xml_content)
+
+def clean_ai_slop(text):
+    """
+    The Anti-Bot Filter. Removes words that scream 'I am ChatGPT'.
+    """
+    forbidden = [
+        "delve", "tapestry", "landscape", "realm", "underscore",
+        "testament", "leverage", "spearhead", "In conclusion",
+        "Here is a post", "Sure!", "**Title**"
     ]
-    for phrase in bad_phrases:
-        raw_text = raw_text.replace(phrase, "")
-    return raw_text.strip().strip('"').strip("'")
+    for word in forbidden:
+        text = text.replace(word, "")
+        text = text.replace(word.capitalize(), "")
+    
+    # Fix double spaces and weird markdown artifacts
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) # Remove bold markdown (LinkedIn raw text prefers caps or unicode)
+    return text.strip()
 
 def get_user_urn():
     url = "https://api.linkedin.com/v2/userinfo"
@@ -57,135 +74,127 @@ def get_user_urn():
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         return f"urn:li:person:{response.json()['sub']}"
-    
-    print(f"❌ LinkedIn Auth Failed: {response.text}")
-    sys.exit(1)
+    sys.exit(f"❌ Auth Failed: {response.status_code}")
 
-def fetch_data(category):
-    """Smart Fetcher that knows what to look for."""
-    print(f"🔍 Scanning Category: {category}...")
-    sources = FEEDS[category]
+# --- 3. THE INTELLIGENCE LAYER (Sourcing) ---
+def fetch_high_value_signal(category):
+    print(f"📡 Scanning Frequency: {category}...")
+    sources = FEEDS.get(category, FEEDS["OPPORTUNITY"])
     random.shuffle(sources)
     
-    for feed in sources:
+    for feed_url in sources:
         try:
-            response = requests.get(feed, timeout=10)
-            if response.status_code == 200:
-                root = ET.fromstring(response.content)
-                items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
-                
-                candidates = items[:5]
-                if candidates:
-                    item = random.choice(candidates)
-                    
-                    title_node = item.find("title")
-                    if title_node is None:
-                        title_node = item.find("{http://www.w3.org/2005/Atom}title")
-                    title = title_node.text if title_node is not None else "News Update"
-                    
-                    link = "No Link"
-                    link_obj = item.find("link")
-                    if link_obj is not None:
-                        link = link_obj.text if link_obj.text else link_obj.attrib.get("href")
-                    else:
-                        atom_link = item.find("{http://www.w3.org/2005/Atom}link")
-                        if atom_link is not None:
-                            link = atom_link.attrib.get("href")
-                    
-                    if category == "CRISIS":
-                        if "investigating" not in title.lower() and "outage" not in title.lower():
-                            continue 
-                            
-                    return f"{title} - {link}"
-        except Exception:
-            continue
-    return None
+            resp = requests.get(feed_url, timeout=10)
+            if resp.status_code != 200: continue
 
-def generate_storyteller_post(category, topic):
-    # 🚀 UPDATED MODEL LIST (Nov 2025)
-    # Tries the newest model first, falls back if you don't have preview access
-    MODELS = [
-        "gemini-3-pro-preview",  # The new beast (Released Nov 18, 2025)
-        "gemini-2.0-flash",      # The fast standard
-        "gemini-1.5-flash"       # The reliable backup
-    ]
-    
-    prompts = {
-        "CRISIS": f"""
-        You are a Breaking News Reporter.
-        Topic: "{topic}"
-        Action: The internet is breaking. Write a post alerting people.
-        Style: Urgent, short, punchy. "Just in 🚨".
-        Do not mention the URL in the text.
-        """,
-        "FINANCE": f"""
-        You are a Market Analyst like specialized in Tech Money.
-        Topic: "{topic}"
-        Action: Explain how this impacts the economy/startups.
-        Style: Analytical but simple. Use numbers if possible.
-        Start with a bold claim.
-        """,
-        "FUTURE": f"""
-        You are a Visionary Tech Leader.
-        Topic: "{topic}"
-        Action: Translate this complex research into a simple benefit for humanity.
-        Style: Optimistic, inspiring. "Imagine a world where..."
-        """,
-        "TREND": f"""
-        You are a Cultural Commentator.
-        Topic: "{topic}"
-        Action: Give your opinion on this trend. Is it hype or real?
-        Style: Conversational, skeptical but open-minded.
-        """
-    }
+            # Save to temporary file to parse (ET requires file or robust string handling)
+            with open("temp_feed.xml", "wb") as f:
+                f.write(resp.content)
 
-    prompt = f"""
-    {prompts[category]}
-    STRICT RULES FOR HUMAN TOUCH:
-    1. Output ONLY the post body. NO intro/outro.
-    2. Do not use emojis in the first sentence.
-    3. Use line breaks between thoughts.
-    4. End with a specific question to the audience.
-    5. Add 3 relevant hashtags at the very bottom.
-    """
-
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    
-    # Loop through models until one works
-    for model in MODELS:
-        # Note: API path v1beta works for all current preview/stable models
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-        
-        try:
-            response = requests.post(url, json=payload, timeout=15)
+            tree = ET.parse("temp_feed.xml")
+            root = tree.getroot()
             
-            if response.status_code == 200:
-                print(f"✅ Success using model: {model}")
-                raw = response.json()['candidates'][0]['content']['parts'][0]['text']
-                return clean_text(raw)
-            else:
-                print(f"⚠️ Model {model} failed ({response.status_code}). Trying next...")
+            # Handle RSS (channel/item) vs Atom (entry)
+            items = []
+            for x in root.findall(".//item"): items.append(x)
+            for x in root.findall(".//entry"): items.append(x)
+            for x in root.findall(".//{http://www.w3.org/2005/Atom}entry"): items.append(x)
+
+            if not items: continue
+
+            # Pick a random candidate from top 5
+            candidates = items[:5]
+            item = random.choice(candidates)
+
+            # Extract Data Robustly
+            title = item.findtext("title") or item.findtext("{http://www.w3.org/2005/Atom}title")
+            link = item.findtext("link")
+            if not link:
+                # Atom feeds often have link as an attribute
+                link_node = item.find("{http://www.w3.org/2005/Atom}link")
+                if link_node is not None:
+                    link = link_node.attrib.get("href")
+            
+            if title and link:
+                return f"{title} ({link})"
                 
         except Exception as e:
-            print(f"⚠️ Connection Error with {model}: {e}")
+            print(f"⚠️ Feed Error: {e}")
             continue
             
-    print("❌ All AI models failed. Check your API Key permissions.")
     return None
 
-def post_to_linkedin(urn, content):
+# --- 4. THE GHOSTWRITER ENGINE (Gemini) ---
+def generate_viral_post(topic):
+    """
+    Constructs a post based on 'Top Voice' frameworks.
+    """
+    
+    # ARCHITECT NOTE: This prompt is the "Shovel". It forces the AI to sell the solution, not just the news.
+    system_instruction = f"""
+    You are a top-tier Tech Thought Leader and Angel Investor on LinkedIn.
+    You do not "summarize news". You analyze **implications** and **opportunities**.
+    
+    CONTEXT:
+    The topic is: "{topic}"
+    
+    YOUR GOAL:
+    Write a high-engagement LinkedIn text post about this topic.
+    
+    STRICT FORMATTING RULES:
+    1. **The Hook:** Start with a punchy, contrarian, or surprising 1-sentence statement. No "Subject:" lines.
+    2. **The Spacing:** Use short paragraphs (1-2 sentences max). Add an empty line between every paragraph.
+    3. **The 'Shovel' Philosophy:** Do not just say what happened. Explain how engineers/founders can USE this to build something (sell the shovel).
+    4. **Visuals:** Use bullet points (•) for lists.
+    5. **Tone:** Confident, slightly informal, professional but not academic.
+    6. **Ending:** End with a question to drive comments.
+    7. **Length:** Keep it under 150 words. Crisp.
+    8. NO HASHTAGS in the body. Put 3 specific hashtags at the very end.
+    """
+
+    payload = {
+        "contents": [{"parts": [{"text": system_instruction}]}],
+        "generationConfig": {
+            "temperature": 0.7, # Creative but stable
+            "maxOutputTokens": 400,
+        }
+    }
+
+    # Model Priority Queue
+    models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"]
+    
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        try:
+            response = requests.post(url, json=payload, timeout=20)
+            if response.status_code == 200:
+                raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+                return clean_ai_slop(raw_text)
+        except:
+            continue
+            
+    return None
+
+def generate_evergreen_post():
+    """Fallback if news is slow. Generates timeless advice."""
+    topics = ["The importance of shipping code fast", "Why 'perfect' is the enemy of 'good'", "How AI is changing entry-level coding"]
+    return generate_viral_post(random.choice(topics))
+
+# --- 5. THE PUBLISHER ---
+def publish_to_linkedin(urn, text):
     url = "https://api.linkedin.com/v2/ugcPosts"
     headers = {
         "Authorization": f"Bearer {LINKEDIN_TOKEN}",
         "Content-Type": "application/json",
         "X-Restli-Protocol-Version": "2.0.0"
     }
+    
     payload = {
         "author": urn,
         "lifecycleState": "PUBLISHED",
         "specificContent": {
             "com.linkedin.ugc.ShareContent": {
-                "shareCommentary": {"text": content},
+                "shareCommentary": {"text": text},
                 "shareMediaCategory": "NONE"
             }
         },
@@ -194,39 +203,47 @@ def post_to_linkedin(urn, content):
     
     res = requests.post(url, headers=headers, json=payload)
     if res.status_code == 201:
-        print("✅ Live on LinkedIn.")
+        print("✅ SUCCESS: Post is Live.")
+        print("-" * 20)
+        print(text)
+        print("-" * 20)
     else:
-        print(f"❌ Post Failed: {res.text}")
+        print(f"❌ ERROR: {res.text}")
 
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
+    print("🚀 Initializing Viral Engine V2...")
+    
+    # 1. Authenticate
+    try:
+        user_urn = get_user_urn()
+        print(f"👤 Authenticated as: {user_urn}")
+    except Exception as e:
+        print(f"❌ Auth Fatal Error: {e}")
+        sys.exit(1)
+
+    # 2. Determine Strategy based on Time
     hour = datetime.utcnow().hour
-    
-    if 0 <= hour < 5:
-        CATEGORY = "FINANCE" if random.random() > 0.5 else "FUTURE"
-    elif 5 <= hour < 13:
-        CATEGORY = "TREND"
+    if 6 <= hour < 12:
+        category = "OPPORTUNITY" # Morning: Motivation/Startups
+    elif 12 <= hour < 18:
+        category = "MARKET_SHIFT" # Afternoon: Business/Crypto
     else:
-        CATEGORY = "CRISIS" if random.random() > 0.8 else "TREND"
+        category = "BREAKTHROUGH" # Evening: Deep Tech/Learning
 
-    # Force TREND for testing if you want to see it run now
-    # CATEGORY = "TREND"
-
-    print(f"🚀 Starting News Engine. Category: {CATEGORY}")
+    # 3. Hunt for Data
+    topic_data = fetch_high_value_signal(category)
     
-    urn = get_user_urn()
-    topic = fetch_data(CATEGORY)
-    
-    if not topic and CATEGORY == "CRISIS":
-        print("No Crisis found. Switching to FUTURE news.")
-        CATEGORY = "FUTURE"
-        topic = fetch_data(CATEGORY)
-
-    if topic:
-        print(f"📝 Storytelling on: {topic}")
-        post = generate_storyteller_post(CATEGORY, topic)
-        if post:
-            post_to_linkedin(urn, post)
-        else:
-            print("❌ Failed to generate post.")
+    # 4. Generate Content
+    if topic_data:
+        print(f"🧠 Synthesizing: {topic_data[:50]}...")
+        post_content = generate_viral_post(topic_data)
     else:
-        print("❌ No interesting stories found today.")
+        print("⚠️ No fresh signals. Deploying Evergreen Protocol.")
+        post_content = generate_evergreen_post()
+
+    # 5. Publish
+    if post_content:
+        publish_to_linkedin(user_urn, post_content)
+    else:
+        print("❌ Generation Failed.")
