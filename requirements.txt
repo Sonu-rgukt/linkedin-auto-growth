@@ -1,6 +1,17 @@
+# --- Core Automation ---
 requests
+telethon             # For your Telegram integration
+python-dotenv        # LOAD KEYS LOCALLY (New)
+
+# --- The Data Lake (Finance & News) ---
 yfinance
-matplotlib
+feedparser           # ROBUST RSS PARSING (New)
+beautifulsoup4       # WEB SCRAPING (New - for deep reading)
+
+# --- Data Science & Analytics ---
 pandas
-huggingface_hub
-telethon
+matplotlib
+huggingface_hub      # For local AI models
+
+# --- Optional: If you switch to official Gemini SDK ---
+# google-generativeai
