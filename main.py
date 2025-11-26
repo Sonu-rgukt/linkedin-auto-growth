@@ -118,7 +118,7 @@ def generate_viral_post(topic):
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         # Using 'gemini-1.5-flash' - currently the most reliable model
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
     except Exception as e:
         print(f"❌ SDK Config Error: {e}")
         return None
