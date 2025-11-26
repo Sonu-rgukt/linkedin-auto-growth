@@ -1,17 +1,18 @@
 # --- Core Automation ---
 requests
-telethon             # For your Telegram integration
-python-dotenv        # LOAD KEYS LOCALLY (New)
+telethon             # Telegram integration
+python-dotenv        # Security (Keys)
 
-# --- The Data Lake (Finance & News) ---
-yfinance
-feedparser           # ROBUST RSS PARSING (New)
-beautifulsoup4       # WEB SCRAPING (New - for deep reading)
+# --- The Brain (Critical) ---
+google-generativeai  # REQUIRED for the new fix (Gemini SDK)
 
-# --- Data Science & Analytics ---
-pandas
-matplotlib
-huggingface_hub      # For local AI models
+# --- The Data Lake ---
+yfinance             # Stocks/Crypto data
+feedparser           # Robust RSS parsing
+beautifulsoup4       # Web scraping
 
-# --- Optional: If you switch to official Gemini SDK ---
-# google-generativeai
+# --- Data Science & Visuals ---
+pandas               # Data analysis
+matplotlib           # Chart generation
+huggingface_hub      # AI Image generation
+Pillow               # Image processing (Required to save AI art)
