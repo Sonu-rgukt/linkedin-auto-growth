@@ -81,7 +81,7 @@ def generate_analysis_text(mode, topic):
     # 1. Configure SDK
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
     except Exception as e:
         print(f"❌ SDK Config Error: {e}")
         return None
