@@ -16,3 +16,4 @@ pandas               # Data analysis
 matplotlib           # Chart generation
 huggingface_hub      # AI Image generation
 Pillow               # Image processing (Required to save AI art)
+importlib-metadata>=4.0.0
