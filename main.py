@@ -1,11 +1,11 @@
 import requests
 import os
-import json
 import random
 import sys
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
+import google.generativeai as genai  # <--- NEW IMPORT
 
 # --- 0. ARCHITECT CONFIGURATION ---
 LINKEDIN_TOKEN = os.environ["LINKEDIN_ACCESS_TOKEN"]
@@ -35,12 +35,7 @@ FEEDS = {
 
 # --- 2. UTILITY: The XML Sanitizer ---
 def parse_feed_robust(xml_content):
-    """
-    Normalizes RSS vs Atom feeds by stripping namespaces.
-    This prevents the parser from failing on different XML standards.
-    """
     try:
-        # Brutal namespace stripping for easier parsing
         it = ET.iterparse(xml_content)
         for _, el in it:
             if '}' in el.tag:
@@ -48,13 +43,9 @@ def parse_feed_robust(xml_content):
         root = it.root
         return root
     except:
-        # Fallback to standard string parsing if iterparse fails
         return ET.fromstring(xml_content)
 
 def clean_ai_slop(text):
-    """
-    The Anti-Bot Filter. Removes words that scream 'I am ChatGPT'.
-    """
     forbidden = [
         "delve", "tapestry", "landscape", "realm", "underscore",
         "testament", "leverage", "spearhead", "In conclusion",
@@ -63,9 +54,7 @@ def clean_ai_slop(text):
     for word in forbidden:
         text = text.replace(word, "")
         text = text.replace(word.capitalize(), "")
-    
-    # Fix double spaces and weird markdown artifacts
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) # Remove bold markdown (LinkedIn raw text prefers caps or unicode)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) 
     return text.strip()
 
 def get_user_urn():
@@ -86,15 +75,13 @@ def fetch_high_value_signal(category):
         try:
             resp = requests.get(feed_url, timeout=10)
             if resp.status_code != 200: continue
-
-            # Save to temporary file to parse (ET requires file or robust string handling)
+            
             with open("temp_feed.xml", "wb") as f:
                 f.write(resp.content)
 
             tree = ET.parse("temp_feed.xml")
             root = tree.getroot()
             
-            # Handle RSS (channel/item) vs Atom (entry)
             items = []
             for x in root.findall(".//item"): items.append(x)
             for x in root.findall(".//entry"): items.append(x)
@@ -102,15 +89,12 @@ def fetch_high_value_signal(category):
 
             if not items: continue
 
-            # Pick a random candidate from top 5
             candidates = items[:5]
             item = random.choice(candidates)
 
-            # Extract Data Robustly
             title = item.findtext("title") or item.findtext("{http://www.w3.org/2005/Atom}title")
             link = item.findtext("link")
             if not link:
-                # Atom feeds often have link as an attribute
                 link_node = item.find("{http://www.w3.org/2005/Atom}link")
                 if link_node is not None:
                     link = link_node.attrib.get("href")
@@ -124,59 +108,47 @@ def fetch_high_value_signal(category):
             
     return None
 
-# --- 4. THE GHOSTWRITER ENGINE (Gemini) ---
+# --- 4. THE GHOSTWRITER ENGINE (Gemini SDK Update) ---
 def generate_viral_post(topic):
     """
-    Constructs a post based on 'Top Voice' frameworks.
+    Constructs a post using the Official Google GenAI SDK.
     """
     
-    # ARCHITECT NOTE: This prompt is the "Shovel". It forces the AI to sell the solution, not just the news.
+    # 1. Configure
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # Using 'gemini-1.5-flash' - currently the most reliable model
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        print(f"❌ SDK Config Error: {e}")
+        return None
+
+    # 2. Prompt
     system_instruction = f"""
-    You are a top-tier Tech Thought Leader and Angel Investor on LinkedIn.
-    You do not "summarize news". You analyze **implications** and **opportunities**.
+    You are a top-tier Tech Thought Leader.
+    Topic: "{topic}"
+    GOAL: Write a high-engagement LinkedIn text post.
     
-    CONTEXT:
-    The topic is: "{topic}"
-    
-    YOUR GOAL:
-    Write a high-engagement LinkedIn text post about this topic.
-    
-    STRICT FORMATTING RULES:
-    1. **The Hook:** Start with a punchy, contrarian, or surprising 1-sentence statement. No "Subject:" lines.
-    2. **The Spacing:** Use short paragraphs (1-2 sentences max). Add an empty line between every paragraph.
-    3. **The 'Shovel' Philosophy:** Do not just say what happened. Explain how engineers/founders can USE this to build something (sell the shovel).
-    4. **Visuals:** Use bullet points (•) for lists.
-    5. **Tone:** Confident, slightly informal, professional but not academic.
-    6. **Ending:** End with a question to drive comments.
-    7. **Length:** Keep it under 150 words. Crisp.
-    8. NO HASHTAGS in the body. Put 3 specific hashtags at the very end.
+    RULES:
+    1. Hook: Start with a punchy, contrarian statement.
+    2. Spacing: Short paragraphs. Empty line between thoughts.
+    3. Value: Explain how to USE this news (The Shovel).
+    4. Tone: Confident, slightly informal.
+    5. Length: Under 150 words.
+    6. Ending: Ask a specific question.
+    7. NO HASHTAGS in body. 3 hashtags at the end.
     """
 
-    payload = {
-        "contents": [{"parts": [{"text": system_instruction}]}],
-        "generationConfig": {
-            "temperature": 0.7, # Creative but stable
-            "maxOutputTokens": 400,
-        }
-    }
-
-    # Model Priority Queue
-    models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"]
-    
-    for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-        try:
-            response = requests.post(url, json=payload, timeout=20)
-            if response.status_code == 200:
-                raw_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-                return clean_ai_slop(raw_text)
-        except:
-            continue
-            
-    return None
+    # 3. Generate
+    try:
+        response = model.generate_content(system_instruction)
+        if response.text:
+            return clean_ai_slop(response.text)
+    except Exception as e:
+        print(f"❌ Gemini API Error: {e}")
+        return None
 
 def generate_evergreen_post():
-    """Fallback if news is slow. Generates timeless advice."""
     topics = ["The importance of shipping code fast", "Why 'perfect' is the enemy of 'good'", "How AI is changing entry-level coding"]
     return generate_viral_post(random.choice(topics))
 
@@ -214,7 +186,6 @@ def publish_to_linkedin(urn, text):
 if __name__ == "__main__":
     print("🚀 Initializing Viral Engine V2...")
     
-    # 1. Authenticate
     try:
         user_urn = get_user_urn()
         print(f"👤 Authenticated as: {user_urn}")
@@ -222,19 +193,16 @@ if __name__ == "__main__":
         print(f"❌ Auth Fatal Error: {e}")
         sys.exit(1)
 
-    # 2. Determine Strategy based on Time
     hour = datetime.utcnow().hour
     if 6 <= hour < 12:
-        category = "OPPORTUNITY" # Morning: Motivation/Startups
+        category = "OPPORTUNITY"
     elif 12 <= hour < 18:
-        category = "MARKET_SHIFT" # Afternoon: Business/Crypto
+        category = "MARKET_SHIFT"
     else:
-        category = "BREAKTHROUGH" # Evening: Deep Tech/Learning
+        category = "BREAKTHROUGH"
 
-    # 3. Hunt for Data
     topic_data = fetch_high_value_signal(category)
     
-    # 4. Generate Content
     if topic_data:
         print(f"🧠 Synthesizing: {topic_data[:50]}...")
         post_content = generate_viral_post(topic_data)
@@ -242,7 +210,6 @@ if __name__ == "__main__":
         print("⚠️ No fresh signals. Deploying Evergreen Protocol.")
         post_content = generate_evergreen_post()
 
-    # 5. Publish
     if post_content:
         publish_to_linkedin(user_urn, post_content)
     else:
