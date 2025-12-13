@@ -1,13 +1,19 @@
-name: News & Jobs Engine (Standard)
+name: LinkedIn Empire Auto-Pilot
 
+# --- TRIGGER CONFIGURATION ---
 on:
   schedule:
-    - cron: '0 3 * * *'   # Morning Insight (8:30 AM IST)
-    - cron: '30 14 * * *' # Evening Jobs (8:00 PM IST)
-  workflow_dispatch:      # Allows manual testing
+    # Runs at 04:00 UTC daily (Which is 9:30 AM IST - Prime Morning Slot)
+    - cron: '0 4 * * *'
+  workflow_dispatch:      # Allows manual "Run Now" button for testing
+
+# --- CRITICAL PERMISSIONS ---
+# This allows the bot to write the 'posted_history.txt' file back to your repo.
+permissions:
+  contents: write
 
 jobs:
-  run-news:
+  run-empire-mode:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -19,10 +25,34 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
+        # This now reads from your updated requirements.txt file
         run: pip install -r requirements.txt
 
-      - name: Run Main Script
+      - name: Run Empire Script
         env:
+          # --- MANDATORY KEYS ---
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_SEARCH_API_KEY: ${{ secrets.GOOGLE_SEARCH_API_KEY }}
+          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: python main.py
+
+      - name: Save Execution History
+        # Commits the history file so the bot remembers what it posted.
+        run: |
+          git config --global user.name 'Empire Bot'
+          git config --global user.email 'bot@noreply.github.com'
+          
+          # Check if history file exists
+          if [[ -f "posted_history.txt" ]]; then
+            git add posted_history.txt
+            
+            # Only commit if there are changes (prevents empty commit errors)
+            if ! git diff-index --quiet HEAD; then
+              git commit -m "🧠 Memory Update: Added recent post to history [skip ci]"
+              git push
+              echo "✅ History saved to repository."
+            else
+              echo "ℹ️ No new history to save."
+            fi
+          fi
