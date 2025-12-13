@@ -4,8 +4,8 @@ import sys
 import json
 import random
 import time
-import google.generativeai as genai
-from datetime import datetime
+from google import genai
+from google.genai import types
 
 # --- 1. EMPIRE CONFIGURATION ---
 LINKEDIN_TOKEN = os.environ.get("LINKEDIN_ACCESS_TOKEN")
@@ -13,13 +13,35 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GOOGLE_SEARCH_API_KEY = os.environ.get("GOOGLE_SEARCH_API_KEY")
 GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID")
 
-# The brain of the operation. We search for these topics.
+# --- INTELLIGENCE GRID ---
 SEARCH_TOPICS = [
-    "breakthrough artificial intelligence news",
-    "major tech startup funding round today",
-    "coding best practices 2025",
-    "future of software engineering",
-    "generative AI business impact"
+    # 1. THE ARCHITECT (Hard Engineering & Deep Tech)
+    "post-quantum cryptography implementation 2025",
+    "rust vs go for backend performance 2025",
+    "multi-agent ai system architecture patterns",
+    "kubernetes alternatives for edge computing",
+    "future of platform engineering vs ai agents",
+
+    # 2. THE STRATEGIST (Enterprise & Market Shifts)
+    "gartner top strategic technology trends 2026",
+    "vertical ai startups healthcare legal construction",
+    "small language models slm vs llm enterprise adoption",
+    "ai governance and digital sovereignty regulations 2025",
+    "generative ai unit economics profitability",
+
+    # 3. THE FOUNDER (Startup Signals & VC Movement)
+    "y combinator request for startups winter 2025 analysis",
+    "contrarian tech startup trends 2025",
+    "bootstrapped saas success stories 2025",
+    "impact of ai on junior developer job market",
+    "non-obvious ai startup ideas reddit",
+
+    # 4. THE VISIONARY (Breakthroughs)
+    "solid state battery commercialization news",
+    "nuclear fusion energy breakthrough 2025",
+    "brain computer interface startups beyond neuralink",
+    "CRISPR gene editing commercial applications 2025",
+    "room temperature superconductor replication attempts"
 ]
 
 HISTORY_FILE = "posted_history.txt"
@@ -48,7 +70,7 @@ def search_the_web_for_news():
     candidates = []
     history = load_history()
     
-    # Pick 2 random topics to search (saves API quota, keeps content fresh)
+    # Pick 2 random topics to search
     daily_topics = random.sample(SEARCH_TOPICS, 2)
     
     for query in daily_topics:
@@ -58,8 +80,8 @@ def search_the_web_for_news():
                 "q": query,
                 "cx": GOOGLE_CSE_ID,
                 "key": GOOGLE_SEARCH_API_KEY,
-                "num": 5,             # Get top 5 results
-                "dateRestrict": "d1", # CRITICAL: Only last 24 hours
+                "num": 3,             
+                "dateRestrict": "d1", # Only last 24 hours
                 "safe": "active"
             }
             
@@ -79,6 +101,7 @@ def search_the_web_for_news():
                             "snippet": snippet,
                             "source": "Google Search"
                         })
+            time.sleep(1) # Be nice to Google Search API
                         
         except Exception as e:
             print(f"⚠️ Search Glitch on '{query}': {e}")
@@ -87,7 +110,7 @@ def search_the_web_for_news():
     return candidates
 
 # --- 4. THE EDITOR-IN-CHIEF (Gemini Selection) ---
-def select_viral_story(candidates):
+def select_viral_story(client, candidates):
     """
     Feeds all search results to Gemini to pick the potential viral hit.
     """
@@ -95,9 +118,6 @@ def select_viral_story(candidates):
 
     print(f"🧠 AI Analyzing {len(candidates)} raw intelligence reports...")
     
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
     # Prepare data for AI
     candidate_list = []
     for i, c in enumerate(candidates):
@@ -112,15 +132,20 @@ def select_viral_story(candidates):
 
     MISSION:
     Identify the single story with the highest potential for LinkedIn engagement.
-    Look for: Contrarian views, major industry shifts, or highly actionable insights for developers/founders.
-    Avoid: Generic "top 10" lists or fluff.
-
+    Look for: Contrarian views, major industry shifts, or highly actionable insights.
+    
     RESPONSE FORMAT (JSON ONLY):
     {{"id": <integer_id>, "reason": "<why_you_chose_this>"}}
     """
     
     try:
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+        response = client.models.generate_content(
+            model='gemini-1.5-flash', # Stable, High Quota Model
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
         result = json.loads(response.text)
         winner = candidates[result['id']]
         print(f"🌟 WINNER SELECTED: {winner['title']}")
@@ -128,12 +153,12 @@ def select_viral_story(candidates):
         return winner
     except Exception as e:
         print(f"❌ Selection Error: {e}")
-        return candidates[0] # Fail-safe
+        return candidates[0]
 
 # --- 5. THE GHOSTWRITER (Gemini Content Gen) ---
-def write_empire_post(article):
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.0-flash') # Using the smart model
+def write_empire_post(client, article):
+    print("⏳ Cooling down AI engines (5s)...")
+    time.sleep(5) 
 
     prompt = f"""
     SOURCE MATERIAL:
@@ -142,7 +167,7 @@ def write_empire_post(article):
     Link: {article['link']}
 
     IDENTITY:
-    You are a "LinkedIn Top Voice" in Technology and Startups. You do not sound like a bot. 
+    You are a "LinkedIn Top Voice" in Technology and Startups.
     You sound like a seasoned founder or CTO sharing a critical insight.
 
     WRITING FRAMEWORK (Use this structure):
@@ -153,32 +178,36 @@ def write_empire_post(article):
 
     RULES:
     - NO emojis in the first 2 lines.
-    - Use line breaks generously (white space = readability).
+    - Use line breaks generously.
     - Tone: Confident, crisp, authoritative.
-    - END with 3 relevant hashtags (e.g. #Tech #AI #Innovation).
-    - Do NOT start with "In the rapidly evolving landscape..." or "I'm thrilled to share".
+    - END with 3 relevant hashtags.
+    - Do NOT start with "In the rapidly evolving landscape..."
     """
     
-    response = model.generate_content(prompt)
-    return response.text.strip()
+    try:
+        response = client.models.generate_content(
+            model='gemini-1.5-flash', # Keeping 1.5-flash for reliability
+            contents=prompt
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"❌ Writing Error: {e}")
+        return None
 
 # --- 6. THE ART DIRECTOR (Google Image Search) ---
 def find_perfect_image(query_term):
-    """
-    Searches Google Images for a high-res, landscape image.
-    """
     print(f"🎨 Commissioning art for: '{query_term}'...")
     image_path = "viral_visual.jpg"
     
     try:
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
-            "q": query_term + " technology wallpaper", # Adding keywords for better aesthetics
+            "q": query_term + " technology wallpaper", 
             "cx": GOOGLE_CSE_ID,
             "key": GOOGLE_SEARCH_API_KEY,
             "searchType": "image",
-            "imgSize": "large",      # High Res
-            "imgType": "photo",      # No clip art
+            "imgSize": "large",      
+            "imgType": "photo",      
             "num": 1,
             "safe": "active"
         }
@@ -189,8 +218,6 @@ def find_perfect_image(query_term):
         if "items" in data:
             img_url = data["items"][0]["link"]
             print(f"🖼️ Image Found: {img_url}")
-            
-            # Download
             img_data = requests.get(img_url, timeout=10).content
             with open(image_path, 'wb') as f:
                 f.write(img_data)
@@ -206,10 +233,12 @@ def get_urn():
     url = "https://api.linkedin.com/v2/userinfo"
     headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}"}
     resp = requests.get(url, headers=headers)
+    if resp.status_code != 200:
+        print(f"❌ LinkedIn Auth Error: {resp.text}")
+        sys.exit(1)
     return f"urn:li:person:{resp.json()['sub']}"
 
 def upload_image(urn, image_path):
-    # 1. Register
     reg_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
     headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}", "Content-Type": "application/json"}
     payload = {
@@ -219,22 +248,26 @@ def upload_image(urn, image_path):
             "serviceRelationships": [{"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}]
         }
     }
-    reg = requests.post(reg_url, headers=headers, json=payload).json()
-    upload_url = reg['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
-    asset = reg['value']['asset']
     
-    # 2. Upload
-    with open(image_path, "rb") as f:
-        requests.put(upload_url, headers={"Authorization": f"Bearer {LINKEDIN_TOKEN}"}, data=f.read())
+    try:
+        reg_resp = requests.post(reg_url, headers=headers, json=payload)
+        reg = reg_resp.json()
+        upload_url = reg['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
+        asset = reg['value']['asset']
         
-    return asset
+        with open(image_path, "rb") as f:
+            requests.put(upload_url, headers={"Authorization": f"Bearer {LINKEDIN_TOKEN}"}, data=f.read())
+            
+        return asset
+    except Exception as e:
+        print(f"❌ Image Upload Failed: {e}")
+        return None
 
 def post_to_linkedin(urn, text, image_asset=None):
     url = "https://api.linkedin.com/v2/ugcPosts"
     headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}", "Content-Type": "application/json", "X-Restli-Protocol-Version": "2.0.0"}
     
     share_content = {"shareCommentary": {"text": text}, "shareMediaCategory": "NONE"}
-    
     if image_asset:
         share_content["shareMediaCategory"] = "IMAGE"
         share_content["media"] = [{"status": "READY", "description": {"text": "Image"}, "media": image_asset, "title": {"text": "Visual"}}]
@@ -257,24 +290,32 @@ def post_to_linkedin(urn, text, image_asset=None):
 if __name__ == "__main__":
     print("🚀 EMPIRE ENGINE STARTING...")
     
-    # 1. Get User
+    # 0. Initialize New Gemini Client
     try:
-        urn = get_urn()
-    except:
-        print("❌ Auth Failed. Check Token.")
+        client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception as e:
+        print(f"❌ Gemini Client Error: {e}")
         sys.exit(1)
+
+    # 1. Get User
+    urn = get_urn()
 
     # 2. Search Web (Last 24h)
     candidates = search_the_web_for_news()
     if not candidates:
-        print("⚠️ No fresh news found in search. Exiting.")
+        print("⚠️ No fresh news found. Sleeping.")
         sys.exit(0)
 
     # 3. Select Best
-    story = select_viral_story(candidates)
+    story = select_viral_story(client, candidates)
 
     # 4. Write Copy
-    copy = write_empire_post(story)
+    copy = write_empire_post(client, story)
+    
+    if not copy:
+        print("❌ AI failed to write copy. Exiting.")
+        sys.exit(1)
+        
     print("\n--- FINAL COPY ---\n" + copy + "\n------------------\n")
 
     # 5. Get Image
@@ -284,4 +325,4 @@ if __name__ == "__main__":
     asset = upload_image(urn, img_path) if img_path else None
     if post_to_linkedin(urn, copy, asset):
         save_to_history(story['link'])
-        if img_path: os.remove(img_path)
+        if img_path and os.path.exists(img_path): os.remove(img_path)
