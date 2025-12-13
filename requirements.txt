@@ -5,6 +5,7 @@ python-dotenv        # Security (Keys)
 
 # --- The Brain (Critical) ---
 google-generativeai  # REQUIRED for the new fix (Gemini SDK)
+google-genai
 
 # --- The Data Lake ---
 yfinance             # Stocks/Crypto data
