@@ -2,9 +2,6 @@ name: LinkedIn Empire Auto-Pilot
 
 # --- TRIGGER CONFIGURATION ---
 on:
-  schedule:
-    # Runs at 04:00 UTC daily (Which is 9:30 AM IST - Prime Morning Slot)
-    - cron: '0 4 * * *'
   workflow_dispatch:      # Allows manual "Run Now" button for testing
 
 # --- CRITICAL PERMISSIONS ---
