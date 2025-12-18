@@ -1,8 +1,6 @@
 name: Empire Visual Engine (Advanced)
 
 on:
-  schedule:
-    - cron: '0 9 * * *'   # Mid-Day Trend (2:30 PM IST)
   workflow_dispatch:      # Allows manual testing
 
 jobs:
