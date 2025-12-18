@@ -1,8 +1,6 @@
 name: Job Hunter Engine
 
 on:
-  schedule:
-    - cron: '0 4,10,16 * * *'  # Runs 3 times a day (approx Morning, Afternoon, Evening IST)
   workflow_dispatch:           # Manual Button
 
 jobs:
